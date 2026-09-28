@@ -13,7 +13,7 @@
 - 若檔案包含 `STATELABELS`，會解析各字元的狀態說明，並在檢索表的狀態編號後顯示其實際意義。
 - 處理前會自動偵測並移除含有缺失值的特徵欄位，避免分類樹把「缺失」誤判為一種真實狀態。
 - 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 `物種A / 物種B`），而不會遺漏。
-- 輸出為易讀的 Markdown 檔案，包含編號、縮排層級與最終物種判定結果。
+- 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 `1a`、`1b`、`2a`），最終物種名稱皆以粗斜體顯示。
 
 ## 系統需求
 
@@ -46,17 +46,29 @@
 
 ## 使用方式
 
-1. 開啟 [nex2polytomous.py](./nex2polytomous.py)，修改檔案開頭的兩個設定：
+1. 開啟 [nex2polytomous.py](./nex2polytomous.py)，修改檔案開頭的設定：
 
    ```python
    NEXUS_FILE_PATH = "your_data.nex"              # 👈 換成你實際的 .nex 檔案路徑
    OUTPUT_MD_PATH = "generated/polytomous_key.md"  # 👈 輸出的 Markdown 檔案路徑（可自訂）
    ```
 
-2. 執行程式：
+2. 執行程式。未指定輸出格式時，預設產生 Markdown 表格：
 
    ```powershell
    python nex2polytomous.py
+   ```
+
+   若要產生傳統編號縮排格式，請使用 `--output-format indented`（或簡寫 `-f indented`）：
+
+   ```powershell
+   python nex2polytomous.py --output-format indented
+   ```
+
+   亦可明確指定表格格式：
+
+   ```powershell
+   python nex2polytomous.py --output-format table
    ```
 
 3. 執行過程中會顯示處理訊息，例如：
@@ -68,15 +80,28 @@
    🎉 轉換完成！檢索表已儲存至：generated/polytomous_key.md
    ```
 
-4. 完成後，即可在指定路徑找到輸出的 Markdown 檢索表，格式範例如下：
+4. 完成後，即可在指定路徑找到輸出的 Markdown 檢索表。`--output-format indented` 的格式範例如下：
 
    ```markdown
    1a. 特徵名稱：狀態為 0（狀態 0 的實際意義） -----------------> 前往步驟 2
    1b. 特徵名稱：狀態為 1（狀態 1 的實際意義） -----------------> 前往步驟 5
-   1c. 特徵名稱：狀態為 2（狀態 2 的實際意義） -----------------> 👉 **物種 C**
-      2a. 另一特徵：狀態為 0（狀態 0 的實際意義） -----------------> 👉 **物種 A**
-      2b. 另一特徵：狀態為 1（狀態 1 的實際意義） -----------------> 👉 **物種 B**
+   1c. 特徵名稱：狀態為 2（狀態 2 的實際意義） -----------------> 👉 ***物種 C***
+      2a. 另一特徵：狀態為 0（狀態 0 的實際意義） -----------------> 👉 ***物種 A***
+      2b. 另一特徵：狀態為 1（狀態 1 的實際意義） -----------------> 👉 ***物種 B***
    ```
+
+   ![傳統編號縮排格式輸出範例](./images/indented.png)
+
+   預設的 `--output-format table` 則會將編號、特徵、狀態與結果分欄：
+
+   ```markdown
+   | 編號 | 特徵 | 狀態 | 結果 |
+   |---|---|---|---|
+   | 1a | Tubercles on glabella [8 modified] | 狀態為 0（tubercles absent or bordering on granule-size） | 前往步驟 2 |
+   | 1b | Tubercles on glabella [8 modified] | 狀態為 1（large tubercles present） | 👉 ***物種 A*** |
+   ```
+
+   ![Markdown 表格格式輸出範例](./images/table.png)
 
 ## 常見問題
 

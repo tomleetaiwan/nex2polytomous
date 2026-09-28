@@ -1,3 +1,4 @@
+import argparse
 import os
 import re
 from collections import Counter
@@ -187,15 +188,10 @@ def parse_nexus_to_dataframe(file_path):
     df = pd.DataFrame(matrix_data, columns=feature_names, index=species_names)
     return df, feature_names, state_labels
 
-# 2. 執行解析
-print(f"正在讀取並解析 NEX 檔案: {NEXUS_FILE_PATH}...")
-df, feature_names, state_labels = parse_nexus_to_dataframe(NEXUS_FILE_PATH)
 
-if df is not None:
-    print(f"✅ 成功載入！共偵測到 {len(df)} 個物種，{len(feature_names)} 個形態特徵（已排除含缺失值的特徵）。")
-
-    # 3. 以 Entropy 計算最佳多分支特徵
-    key_lines = []
+def build_key_rows(df, feature_names, state_labels):
+    """以 Entropy 建立檢索表資料列。"""
+    key_rows = []
     pair_counter = 1
 
     def entropy(row_indices):
@@ -219,14 +215,13 @@ if df is not None:
         )
         return entropy(row_indices) - remainder
 
-    def state_description(feature_idx, state):
+    def state_text(feature_idx, state):
         labels = state_labels.get(feature_idx, {})
-        state_text = f"{state}（{labels[state]}）" if state in labels else str(state)
-        return f"{feature_names[feature_idx]}：狀態為 {state_text}"
+        value = f"{state}（{labels[state]}）" if state in labels else str(state)
+        return f"狀態為 {value}"
 
     def recurse(row_indices, available_features, depth):
-        global pair_counter
-        indent = "   " * depth  # 控制視覺縮排
+        nonlocal pair_counter
 
         candidate_features = [
             feature_idx for feature_idx in available_features
@@ -251,19 +246,20 @@ if df is not None:
         for branch_index, state in enumerate(sorted(partitions)):
             partition = partitions[state]
             suffix = chr(ord("a") + branch_index)
-            desc = state_description(feature_idx, state)
+            step = f"{current_pair}{suffix}"
+            feature = feature_names[feature_idx]
+            state_value = state_text(feature_idx, state)
             can_split = any(
                 len(partition_by_state(partition, candidate)) > 1
                 for candidate in remaining_features
             )
             if len(partition) > 1 and can_split:
-                key_lines.append(f"{indent}{current_pair}{suffix}. {desc} -----------------> 前往步驟 {pair_counter}")
+                key_rows.append((step, feature, state_value, f"前往步驟 {pair_counter}", depth))
                 recurse(partition, remaining_features, depth + 1)
             else:
-                species = " / ".join(df.index[row_index] for row_index in partition)
-                key_lines.append(f"{indent}{current_pair}{suffix}. {desc} -----------------> 👉 **{species}**")
+                species = [df.index[row_index] for row_index in partition]
+                key_rows.append((step, feature, state_value, species, depth))
 
-    # 開始建立檢索表結構
     all_rows = list(range(len(df)))
     all_features = list(range(len(feature_names)))
     if len(df) > 1 and any(
@@ -272,14 +268,109 @@ if df is not None:
     ):
         recurse(all_rows, all_features, 0)
     else:
-        key_lines.append(f"👉 **{' / '.join(df.index)}**")
+        key_rows.append(("", "", "", list(df.index), 0))
 
-    # 4. 輸出成 Markdown 檔案
-    os.makedirs(os.path.dirname(OUTPUT_MD_PATH), exist_ok=True)
+    return key_rows
+
+
+def format_species(species):
+    """將各物種名稱分別套用 Markdown 粗斜體。"""
+    return " / ".join(f"***{name}***" for name in species)
+
+
+def _escape_markdown_table_cell(value):
+    return str(value).replace("|", r"\|").replace("\r", " ").replace("\n", " ")
+
+
+def _key_row_sort_key(row):
+    step = row[0]
+    if not step:
+        return 0, ""
+
+    match = re.fullmatch(r"(\d+)([A-Za-z]+)", step)
+    if not match:
+        raise ValueError(f"無法排序的步驟編號：{step!r}")
+    return int(match.group(1)), match.group(2).casefold()
+
+
+def render_key_markdown(key_rows, output_format):
+    """將檢索表資料列輸出為縮排文字或 Markdown 表格。"""
+    if output_format not in {"indented", "table"}:
+        raise ValueError(
+            f"不支援的輸出格式：{output_format!r}；請使用 'indented' 或 'table'。"
+        )
+
+    sorted_key_rows = sorted(key_rows, key=_key_row_sort_key)
+
+    if output_format == "indented":
+        lines = []
+        for step, feature, state, result, depth in sorted_key_rows:
+            formatted_result = format_species(result) if isinstance(result, list) else result
+            if not step:
+                lines.append(f"👉 {formatted_result}")
+                continue
+            indent = "   " * depth
+            lines.append(
+                f"{indent}{step}. {feature}：{state} -----------------> "
+                f"{'👉 ' if isinstance(result, list) else ''}{formatted_result}"
+            )
+        return "\n".join(lines)
+
+    if output_format == "table":
+        lines = [
+            "| 編號 | 特徵 | 狀態 | 結果 |",
+            "|---|---|---|---|",
+        ]
+        for step, feature, state, result, _depth in sorted_key_rows:
+            formatted_result = format_species(result) if isinstance(result, list) else result
+            if isinstance(result, list):
+                formatted_result = f"👉 {formatted_result}"
+            cells = [
+                _escape_markdown_table_cell(value)
+                for value in (step, feature, state, formatted_result)
+            ]
+            lines.append(f"| {' | '.join(cells)} |")
+        return "\n".join(lines)
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="將 NEXUS 形態矩陣轉換為多分叉檢索表。")
+    parser.add_argument(
+        "-f",
+        "--output-format",
+        choices=("table", "indented"),
+        default="table",
+        help="輸出格式（預設：table）",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    print(f"正在讀取並解析 NEX 檔案: {NEXUS_FILE_PATH}...")
+    df, feature_names, state_labels = parse_nexus_to_dataframe(NEXUS_FILE_PATH)
+    if df is None:
+        return
+
+    print(f"✅ 成功載入！共偵測到 {len(df)} 個物種，{len(feature_names)} 個形態特徵（已排除含缺失值的特徵）。")
+    key_rows = build_key_rows(df, feature_names, state_labels)
+    key_markdown = render_key_markdown(key_rows, args.output_format)
+    title = (
+        "Markdown 表格式多分叉檢索表"
+        if args.output_format == "table"
+        else "傳統編號縮排式多分叉檢索表 (Indented Multi-access Key)"
+    )
+
+    output_directory = os.path.dirname(OUTPUT_MD_PATH)
+    if output_directory:
+        os.makedirs(output_directory, exist_ok=True)
     with open(OUTPUT_MD_PATH, "w", encoding="utf-8") as f:
-        f.write("# 傳統編號縮排式多分叉檢索表 (Indented Multi-access Key)\n")
+        f.write(f"# {title}\n")
         f.write(f"本檢索表由 NEX 形態矩陣自動優化生成，共包含 {len(df)} 個物種。\n\n---\n\n")
-        for line in key_lines:
-            f.write(line + "\n")
-            
+        f.write(key_markdown + "\n")
+
     print(f"🎉 轉換完成！檢索表已儲存至：{OUTPUT_MD_PATH}")
+
+
+if __name__ == "__main__":
+    main()
