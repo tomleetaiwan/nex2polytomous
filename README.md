@@ -1,20 +1,20 @@
 # nex2dichotomous
 
-將 NEXUS（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
+將 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
 
-程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，**先移除任一物種含有缺失符號（missing/gap，如 `?`、`-`）的特徵欄位**，再以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的**編號縮排格式（如 `1a.`、`1b.`、`1c.`、`2a.`…）**。
+程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，先移除任一物種含有缺失符號（?）或間隙（-）之特徵欄位，再以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的編號縮排格式（如 1a.、1b.、1c.、2a.…）。
 
-測試用 NEXUS 檔案: `2009-early-and-middle-devonian-phacopidae-of-south-moroccan.nex` 取自於 [MorphoBank](https://www.morphobank.org/project/2702/matrices) 是摩洛哥南部泥盆紀鏡眼三葉蟲支序分類論文 [Palaeontographica Canadiana No. 28: Early and Middle Devonian Phacopidae (Trilobita) of southern Morocco is a 2009 scientific monograph written by Ryan C. McKellar and Brian D. E. Chatterton.](https://www.researchgate.net/publication/232196035_Early_and_Middle_Devonian_Phacopidae_Trilobita_of_southern_Morocco) 當時以支序分類軟體 PAUP 分析時所使用之 NEXUS 檔案。
+測試用 NEXUS 檔案: 2009-early-and-middle-devonian-phacopidae-of-south-moroccan.nex 取自於 [MorphoBank](https://www.morphobank.org/project/2702/matrices) 是摩洛哥南部泥盆紀鏡眼三葉蟲支序分類論文 [Palaeontographica Canadiana No. 28: Early and Middle Devonian Phacopidae (Trilobita) of southern Morocco is a 2009 scientific monograph written by Ryan C. McKellar and Brian D. E. Chatterton.](https://www.researchgate.net/publication/232196035_Early_and_Middle_Devonian_Phacopidae_Trilobita_of_southern_Morocco) 當時以支序分類軟體 PAUP 分析時所使用之 NEXUS 檔案。
 
 ## 功能特色
 
 - 支援標準 NEXUS 檔案（以 [Biopython](https://biopython.org/) 解析）。
-- 若檔案使用 Biopython 無法解析的 `CHARLABELS` 語法（例如部分 MorphoBank 匯出格式），會自動改用內建的簡易格式解析器重試，盡量取回物種名稱、特徵名稱與矩陣資料。
-- 若檔案包含 `STATELABELS`，會解析各字元的狀態說明，並在檢索表的狀態編號後顯示其實際意義。
+- 若檔案使用 Biopython 無法解析的 CHARLABELS 語法（例如部分 MorphoBank 匯出格式），會自動改用內建的簡易格式解析器重試，盡量取回物種名稱、特徵名稱與矩陣資料。
+- 若檔案包含 STATELABELS，會解析各字元的狀態說明，並在檢索表的狀態編號後顯示其實際意義。
 - 處理前會自動偵測並移除含有缺失值的特徵欄位，避免分類樹把「缺失」誤判為一種真實狀態。
-- 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 `物種A / 物種B`），而不會遺漏。
+- 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 物種A / 物種B），而不會遺漏。
 - 執行時可依序指定容易觀察或必要的特徵；指定特徵優先使用完畢後，其餘節點仍採用資訊增益最高者優先。
-- 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 `1a`、`1b`、`2a`），最終物種名稱皆以粗斜體顯示。
+- 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 1a、1b、2a），最終物種名稱皆以粗斜體顯示。
 
 ## 特徵選擇演算法
 
@@ -28,26 +28,26 @@ Entropy 用來表示目前物種集合的不確定程度：
 H(S) = -Σ pᵢ log₂(pᵢ)
 ```
 
-其中 `S` 是目前節點中的物種集合，`pᵢ` 是各物種在集合中所占的比例。當每個物種名稱均唯一時，包含 `n` 個物種的集合其 entropy 為 `log₂(n)`。
+其中 S 是目前節點中的物種集合，pᵢ 是各物種在集合中所占的比例。當每個物種名稱均唯一時，包含 n 個物種的集合其 entropy 為 log₂(n)。
 
 ### Information Gain
 
-對每個候選特徵，程式會依其狀態值（如 `0`、`1`、`2`）將目前的物種分組，再計算分組後剩餘的加權 entropy：
+對每個候選特徵，程式會依其狀態值（如 0、1、2）將目前的物種分組，再計算分組後剩餘的加權 entropy：
 
 ```text
 Remainder(S, A) = Σ (|Sᵥ| / |S|) H(Sᵥ)
 IG(S, A) = H(S) - Remainder(S, A)
 ```
 
-其中 `A` 是候選特徵，`Sᵥ` 是特徵狀態 `v` 對應的物種子集合。Information Gain 越高，表示該特徵越能降低目前的不確定性。程式通常會偏好能產生較多且分布較平均之群組的特徵。
+其中 A 是候選特徵，Sᵥ 是特徵狀態 v 對應的物種子集合。Information Gain 越高，表示該特徵越能降低目前的不確定性。程式通常會偏好能產生較多且分布較平均之群組的特徵。
 
 例如 8 個物種的分組效果：
 
 | 分組結果 | Information Gain |
 |---|---:|
-| `4 / 4` | `1 bit` |
-| `7 / 1` | 約 `0.544 bit` |
-| `2 / 2 / 2 / 2` | `2 bits` |
+| 4 / 4 | 1 bit |
+| 7 / 1 | 約 0.544 bit |
+| 2 / 2 / 2 / 2 | 2 bits |
 
 ### 實際選擇流程
 
@@ -162,15 +162,15 @@ IG(S, A) = H(S) - Remainder(S, A)
 ## 常見問題
 
 - **為什麼有些特徵在輸出中不見了？**
-  因為該特徵在至少一個物種上為缺失值（`?`）或間隙（`-`），程式會在建立分類樹前先整欄移除，以避免用不完整或不確定的資料做為判斷依據。
+  因為該特徵在至少一個物種上為缺失值（?）或間隙（-），程式會在建立分類樹前先整欄移除，以避免用不完整或不確定的資料做為判斷依據。
 
 - **為什麼有兩個（或多個）物種名稱同時出現在同一個判定結果？**
   代表在移除缺失特徵後，這些物種在剩餘的所有特徵上完全相同，現有資料已無法再進一步區分它們，因此會並列顯示，而不是隨機選一個。
 
 - **讀取檔案時出現「Biopython 解析失敗」訊息怎麼辦？**
-  這通常是因為 `.nex` 檔案使用了 Biopython 不支援的 `CHARLABELS` 格式（例如部分 MorphoBank 匯出檔）。此時程式會自動改用內建的簡易格式解析器重試，通常仍可正確取得物種與矩陣資料；若特徵名稱無法解析，將以 `Char_1`、`Char_2`…等預設名稱代替。
+  這通常是因為 .nex 檔案使用了 Biopython 不支援的 CHARLABELS 格式（例如部分 MorphoBank 匯出檔）。此時程式會自動改用內建的簡易格式解析器重試，通常仍可正確取得物種與矩陣資料；若特徵名稱無法解析，將以 Char_1、Char_2…等預設名稱代替。
 
 ## 授權
 
 本專案原始碼採用 [MIT License](./LICENSE) 授權，可自由使用、修改與散布。
-惟本專案所附範例 `.nex` 資料檔案僅供測試展示之用，請依你實際所使用的 NEXUS 資料檔案本身之授權條款使用。
+惟本專案所附範例 .nex 資料檔案僅供測試展示之用，請依你實際所使用的 NEXUS 資料檔案本身之授權條款使用。
