@@ -189,10 +189,11 @@ def parse_nexus_to_dataframe(file_path):
     return df, feature_names, state_labels
 
 
-def build_key_rows(df, feature_names, state_labels):
-    """以 Entropy 建立檢索表資料列。"""
+def build_key_rows(df, feature_names, state_labels, required_features=None):
+    """優先使用指定特徵，其餘以 Entropy 建立檢索表資料列。"""
     key_rows = []
     pair_counter = 1
+    required_features = required_features or []
 
     def entropy(row_indices):
         counts = Counter(df.index[row_index] for row_index in row_indices)
@@ -230,10 +231,19 @@ def build_key_rows(df, feature_names, state_labels):
         if not candidate_features:
             return
 
-        feature_idx = max(
-            candidate_features,
-            key=lambda candidate: information_gain(row_indices, candidate),
+        feature_idx = next(
+            (
+                required_feature
+                for required_feature in required_features
+                if required_feature in candidate_features
+            ),
+            None,
         )
+        if feature_idx is None:
+            feature_idx = max(
+                candidate_features,
+                key=lambda candidate: information_gain(row_indices, candidate),
+            )
         partitions = partition_by_state(row_indices, feature_idx)
 
         current_pair = pair_counter
@@ -271,6 +281,44 @@ def build_key_rows(df, feature_names, state_labels):
         key_rows.append(("", "", "", list(df.index), 0))
 
     return key_rows
+
+
+def prompt_required_features(feature_names, input_fn=None, output_fn=print):
+    """列出特徵並取得使用者指定的優先順序，回傳零起算索引。"""
+    if input_fn is None:
+        input_fn = input
+
+    output_fn("\n可用的形態特徵：")
+    for number, feature_name in enumerate(feature_names, start=1):
+        output_fn(f"{number}. {feature_name}")
+
+    prompt = (
+        "\n請依優先順序輸入必要特徵的序號（以逗點分隔）；"
+        "直接按 Enter 則完全採用資訊增益："
+    )
+    while True:
+        raw_value = input_fn(prompt).strip()
+        if not raw_value:
+            output_fn("未指定必要特徵，將完全採用資訊增益最高者優先。")
+            return []
+
+        values = [value.strip() for value in raw_value.replace("，", ",").split(",")]
+        try:
+            numbers = [int(value) for value in values]
+        except ValueError:
+            output_fn("輸入格式錯誤：請輸入以逗點分隔的整數序號。")
+            continue
+
+        if any(number < 1 or number > len(feature_names) for number in numbers):
+            output_fn(f"序號超出範圍：請輸入 1 到 {len(feature_names)} 之間的序號。")
+            continue
+        if len(numbers) != len(set(numbers)):
+            output_fn("必要特徵序號不可重複，請重新輸入。")
+            continue
+
+        selected_names = " → ".join(feature_names[number - 1] for number in numbers)
+        output_fn(f"必要特徵優先順序：{selected_names}")
+        return [number - 1 for number in numbers]
 
 
 def format_species(species):
@@ -353,7 +401,13 @@ def main(argv=None):
         return
 
     print(f"✅ 成功載入！共偵測到 {len(df)} 個物種，{len(feature_names)} 個形態特徵（已排除含缺失值的特徵）。")
-    key_rows = build_key_rows(df, feature_names, state_labels)
+    required_features = prompt_required_features(feature_names)
+    key_rows = build_key_rows(
+        df,
+        feature_names,
+        state_labels,
+        required_features=required_features,
+    )
     key_markdown = render_key_markdown(key_rows, args.output_format)
     title = (
         "Markdown 表格式多分叉檢索表"

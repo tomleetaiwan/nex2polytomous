@@ -2,9 +2,9 @@
 
 將 NEXUS（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
 
-程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，**先移除任一物種含有缺失符號（missing/gap，如 `?`、`-`）的特徵欄位**，再以 entropy 準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的**編號縮排格式（如 `1a.`、`1b.`、`1c.`、`2a.`…）**。
+程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，**先移除任一物種含有缺失符號（missing/gap，如 `?`、`-`）的特徵欄位**，再以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的**編號縮排格式（如 `1a.`、`1b.`、`1c.`、`2a.`…）**。
 
-測試用 NEXUS 檔案: `2009-early-and-middle-devonian-phacopidae-of-south-moroccan.nex` 取自於 [MorphoBank](https://www.morphobank.org/project/2702/matrices) 是摩洛哥南部泥盆紀鏡眼蟲支序分類論文 [Palaeontographica Canadiana No. 28: Early and Middle Devonian Phacopidae (Trilobita) of southern Morocco is a 2009 scientific monograph written by Ryan C. McKellar and Brian D. E. Chatterton.](https://www.researchgate.net/publication/232196035_Early_and_Middle_Devonian_Phacopidae_Trilobita_of_southern_Morocco) 當時以支序分類軟體 PAUP 分析時所使用之 NEXUS 檔案。
+測試用 NEXUS 檔案: `2009-early-and-middle-devonian-phacopidae-of-south-moroccan.nex` 取自於 [MorphoBank](https://www.morphobank.org/project/2702/matrices) 是摩洛哥南部泥盆紀鏡眼三葉蟲支序分類論文 [Palaeontographica Canadiana No. 28: Early and Middle Devonian Phacopidae (Trilobita) of southern Morocco is a 2009 scientific monograph written by Ryan C. McKellar and Brian D. E. Chatterton.](https://www.researchgate.net/publication/232196035_Early_and_Middle_Devonian_Phacopidae_Trilobita_of_southern_Morocco) 當時以支序分類軟體 PAUP 分析時所使用之 NEXUS 檔案。
 
 ## 功能特色
 
@@ -13,7 +13,53 @@
 - 若檔案包含 `STATELABELS`，會解析各字元的狀態說明，並在檢索表的狀態編號後顯示其實際意義。
 - 處理前會自動偵測並移除含有缺失值的特徵欄位，避免分類樹把「缺失」誤判為一種真實狀態。
 - 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 `物種A / 物種B`），而不會遺漏。
+- 執行時可依序指定容易觀察或必要的特徵；指定特徵優先使用完畢後，其餘節點仍採用資訊增益最高者優先。
 - 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 `1a`、`1b`、`2a`），最終物種名稱皆以粗斜體顯示。
+
+## 特徵選擇演算法
+
+本工具採用**資訊增益（Information Gain）最高的特徵優先**策略。這是一種類似決策樹 ID3 的貪婪式特徵選擇方法，但本工具並不是完整的 ID3 分類器。
+
+### Entropy
+
+Entropy 用來表示目前物種集合的不確定程度：
+
+```text
+H(S) = -Σ pᵢ log₂(pᵢ)
+```
+
+其中 `S` 是目前節點中的物種集合，`pᵢ` 是各物種在集合中所占的比例。當每個物種名稱均唯一時，包含 `n` 個物種的集合其 entropy 為 `log₂(n)`。
+
+### Information Gain
+
+對每個候選特徵，程式會依其狀態值（如 `0`、`1`、`2`）將目前的物種分組，再計算分組後剩餘的加權 entropy：
+
+```text
+Remainder(S, A) = Σ (|Sᵥ| / |S|) H(Sᵥ)
+IG(S, A) = H(S) - Remainder(S, A)
+```
+
+其中 `A` 是候選特徵，`Sᵥ` 是特徵狀態 `v` 對應的物種子集合。Information Gain 越高，表示該特徵越能降低目前的不確定性。程式通常會偏好能產生較多且分布較平均之群組的特徵。
+
+例如 8 個物種的分組效果：
+
+| 分組結果 | Information Gain |
+|---|---:|
+| `4 / 4` | `1 bit` |
+| `7 / 1` | 約 `0.544 bit` |
+| `2 / 2 / 2 / 2` | `2 bits` |
+
+### 實際選擇流程
+
+程式會在檢索表的每個節點依下列順序選擇特徵：
+
+1. 排除所有在目前物種集合中只有單一狀態、無法產生分支的特徵。
+2. 若使用者指定必要特徵，依輸入順序選擇第一個能區分目前物種集合的必要特徵。
+3. 若必要特徵均不適用或已在目前路徑使用，選擇 Information Gain 最高的候選特徵。
+4. 若多個特徵的 Information Gain 完全相同，選擇原始 NEXUS Matrix 中排列較前的特徵。
+5. 依選定特徵的狀態建立分支，並在各子集合中重複上述流程；同一路徑不會重複使用同一特徵。
+
+這是逐節點選擇當下最佳特徵的**貪婪演算法（Greedy Algorithm）**，不會窮舉所有可能的特徵排列。因此它不保證產生全域步驟最少或平均鑑定路徑最短的檢索表。使用者可透過必要特徵功能，優先安排容易觀察的特徵、觀察成本較低的特徵或分類上重要的特徵，再由 Information Gain 處理其餘選擇。
 
 ## 系統需求
 
@@ -71,14 +117,24 @@
    python nex2polytomous.py --output-format table
    ```
 
-3. 執行過程中會顯示處理訊息，例如：
+3. 成功讀取資料後，程式會依序列出所有可用特徵，並要求輸入必要特徵的序號：
 
    ```text
    正在讀取並解析 NEX 檔案: your_data.nex...
    🧹 已移除 N 個含有缺失符號 (missing symbols) 的特徵欄位，共保留 M 個。
    ✅ 成功載入！共偵測到 X 個物種，M 個形態特徵（已排除含缺失值的特徵）。
+
+   可用的形態特徵：
+   1. Glabellar width [1 modified]
+   2. Occipital ring width [3]
+   3. Tubercles on glabella [8 modified]
+
+   請依優先順序輸入必要特徵的序號（以逗點分隔）；直接按 Enter 則完全採用資訊增益：3,1
+   必要特徵優先順序：Tubercles on glabella [8 modified] → Glabellar width [1 modified]
    🎉 轉換完成！檢索表已儲存至：generated/polytomous_key.md
    ```
+
+   輸入的先後順序就是必要特徵的優先順序。若某個必要特徵無法區分目前分支中的物種，程式會跳至下一個必要特徵；必要特徵都不適用或已使用後，便恢復選擇資訊增益（Information Gain）最高的特徵。若不需要指定必要特徵，直接按 Enter 即可完全採用原本的資訊增益策略。
 
 4. 完成後，即可在指定路徑找到輸出的 Markdown 檢索表。`--output-format indented` 的格式範例如下：
 
