@@ -1,4 +1,4 @@
-# nex2dichotomous
+# nex2polytomous
 
 將 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
 
