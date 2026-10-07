@@ -57,6 +57,80 @@ def _split_unquoted(text, separator):
     return parts
 
 
+def _strip_nexus_comments(text):
+    """移除未被單引號包住的 NEXUS 方括號註解，並保留原始換行。"""
+    output = []
+    comment_depth = 0
+    in_quote = False
+    index = 0
+
+    while index < len(text):
+        char = text[index]
+        if comment_depth:
+            if char == "[":
+                comment_depth += 1
+            elif char == "]":
+                comment_depth -= 1
+            output.append("\n" if char == "\n" else " ")
+            index += 1
+            continue
+
+        if char == "'":
+            output.append(char)
+            if in_quote and index + 1 < len(text) and text[index + 1] == "'":
+                output.append("'")
+                index += 2
+                continue
+            in_quote = not in_quote
+        elif char == "[" and not in_quote:
+            comment_depth = 1
+            output.append(" ")
+        else:
+            output.append(char)
+        index += 1
+
+    if comment_depth:
+        raise ValueError("NEXUS 註解缺少結尾方括號")
+    if in_quote:
+        raise ValueError("NEXUS 單引號字串缺少結尾引號")
+    return "".join(output)
+
+
+def _tokenize_nexus(text):
+    """將 NEXUS 指令內容切成字詞，並處理單引號及兩個單引號的跳脫。"""
+    tokens = []
+    token = []
+    in_quote = False
+    index = 0
+
+    while index < len(text):
+        char = text[index]
+        if in_quote:
+            if char == "'":
+                if index + 1 < len(text) and text[index + 1] == "'":
+                    token.append("'")
+                    index += 2
+                    continue
+                in_quote = False
+            else:
+                token.append(char)
+        elif char == "'":
+            in_quote = True
+        elif char.isspace() or char == ",":
+            if token:
+                tokens.append("".join(token))
+                token = []
+        else:
+            token.append(char)
+        index += 1
+
+    if in_quote:
+        raise ValueError("NEXUS 單引號字串缺少結尾引號")
+    if token:
+        tokens.append("".join(token))
+    return tokens
+
+
 def parse_statelabels(file_path):
     """解析 STATELABELS，回傳零起算字元索引及各狀態編號對應的說明。"""
     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -83,68 +157,120 @@ def parse_statelabels(file_path):
     return state_labels
 
 
-def _parse_with_biopython(file_path):
-    """優先使用 Biopython 解析標準 NEXUS 檔案，回傳原始（未去除缺失值）的字元矩陣"""
-    from Bio.Nexus import Nexus  # 正確用法：從 Bio.Nexus 匯入 Nexus 類別
-
-    nex = Nexus.Nexus(file_path)
-    species_names = list(nex.taxlabels)
-    first_taxon = species_names[0]
-    num_features = len(nex.matrix[first_taxon])
-
-    if getattr(nex, "charlabels", None):
-        feature_names = [nex.charlabels.get(i, f"Char_{i + 1}") for i in range(num_features)]
-    else:
-        feature_names = [f"Char_{i + 1}" for i in range(num_features)]
-
-    raw_rows = {taxon: [str(state) for state in nex.matrix[taxon]] for taxon in species_names}
-    missing_symbols = {str(nex.missing), str(nex.gap)}
-    return species_names, feature_names, raw_rows, missing_symbols
+def _format_flag_enabled(format_text, option):
+    match = re.search(
+        rf"\b{re.escape(option)}\b(?:\s*=\s*(\w+))?",
+        format_text,
+        re.IGNORECASE,
+    )
+    return bool(match and (match.group(1) or "YES").upper() not in {"NO", "FALSE", "0"})
 
 
-def _parse_with_regex_fallback(file_path):
-    """當 Biopython 無法解析（例如某些 MorphoBank 匯出格式的 CHARLABELS 語法）時，
-    改用簡易正規表示式直接讀取 TAXLABELS / FORMAT / MATRIX 區塊。"""
+def _format_value(format_text, option, default=None):
+    match = re.search(
+        rf"\b{re.escape(option)}\s*=\s*(?:\"([^\"]*)\"|'((?:''|[^'])*)'|([^\s]+))",
+        format_text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return default
+    value = next(group for group in match.groups() if group is not None)
+    return value.replace("''", "'")
+
+
+def _parse_nexus(file_path):
+    """以標準函式庫解析本工具支援的 NEXUS 形態矩陣子集。"""
     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-        text = f.read()
+        text = _strip_nexus_comments(f.read())
 
-    taxlabels_match = re.search(r"TAXLABELS(.*?);", text, re.IGNORECASE | re.DOTALL)
-    if not taxlabels_match:
+    taxlabels_block = _extract_nexus_command(text, "TAXLABELS")
+    if taxlabels_block is None:
         raise ValueError("找不到 TAXLABELS 區塊")
-    species_names = [a or b for a, b in re.findall(r"'([^']*)'|(\S+)", taxlabels_match.group(1))]
+    species_names = _tokenize_nexus(taxlabels_block)
+    if not species_names:
+        raise ValueError("TAXLABELS 區塊沒有物種名稱")
 
-    missing_match = re.search(r"MISSING\s*=\s*(\S)", text, re.IGNORECASE)
-    gap_match = re.search(r"GAP\s*=\s*(\S)", text, re.IGNORECASE)
-    missing_symbols = {missing_match.group(1) if missing_match else "?",
-                        gap_match.group(1) if gap_match else "-"}
-
+    ntax_match = re.search(r"\bNTAX\s*=\s*(\d+)", text, re.IGNORECASE)
+    if ntax_match and int(ntax_match.group(1)) != len(species_names):
+        raise ValueError(
+            f"TAXLABELS 有 {len(species_names)} 個物種，但 NTAX={ntax_match.group(1)}"
+        )
     nchar_match = re.search(r"NCHAR\s*=\s*(\d+)", text, re.IGNORECASE)
-    num_features = int(nchar_match.group(1)) if nchar_match else None
+    if not nchar_match:
+        raise ValueError("找不到 DIMENSIONS NCHAR")
+    num_features = int(nchar_match.group(1))
 
-    matrix_match = re.search(r"MATRIX(.*?);", text, re.IGNORECASE | re.DOTALL)
-    if not matrix_match:
+    format_text = _extract_nexus_command(text, "FORMAT")
+    if format_text is None:
+        raise ValueError("找不到 FORMAT 區塊")
+    datatype = _format_value(format_text, "DATATYPE", "STANDARD")
+    if datatype.upper() != "STANDARD":
+        raise ValueError(f"不支援 DATATYPE={datatype}；僅支援 STANDARD")
+    for unsupported_option in ("INTERLEAVE", "TRANSPOSE", "TOKENS"):
+        if _format_flag_enabled(format_text, unsupported_option):
+            raise ValueError(f"目前不支援 FORMAT {unsupported_option}")
+    for unsupported_option in ("MATCHCHAR", "EQUATE"):
+        if _format_value(format_text, unsupported_option) is not None:
+            raise ValueError(f"目前不支援 FORMAT {unsupported_option}")
+
+    missing = _format_value(format_text, "MISSING", "?")
+    gap = _format_value(format_text, "GAP", "-")
+    if len(missing) != 1 or len(gap) != 1:
+        raise ValueError("MISSING 與 GAP 必須是單一字元")
+    missing_symbols = {missing, gap}
+
+    symbols = _format_value(format_text, "SYMBOLS", "01")
+    allowed_states = set(symbols) | missing_symbols
+    non_integer_symbols = [symbol for symbol in symbols if not symbol.isdecimal()]
+    if non_integer_symbols:
+        raise ValueError("本工具僅支援以整數表示的單字元狀態")
+
+    charlabels_block = _extract_nexus_command(text, "CHARLABELS")
+    if charlabels_block is None:
+        raise ValueError("找不到 CHARLABELS 區塊")
+    feature_names = _tokenize_nexus(charlabels_block)
+    if len(feature_names) != num_features:
+        raise ValueError(
+            f"CHARLABELS 有 {len(feature_names)} 個名稱，但 NCHAR={num_features}"
+        )
+
+    statelabels_block = _extract_nexus_command(text, "STATELABELS")
+    if statelabels_block is None or not statelabels_block.strip():
+        raise ValueError("找不到 STATELABELS 區塊或區塊內容為空")
+
+    matrix_block = _extract_nexus_command(text, "MATRIX")
+    if matrix_block is None:
         raise ValueError("找不到 MATRIX 區塊")
 
     raw_rows = {}
-    for line in matrix_match.group(1).splitlines():
-        line = line.strip()
-        if not line:
+    for line_number, line in enumerate(matrix_block.splitlines(), start=1):
+        tokens = _tokenize_nexus(line)
+        if not tokens:
             continue
-        row_match = re.match(r"'([^']*)'\s+(\S+)$", line) or re.match(r"(\S+)\s+(\S+)$", line)
-        if row_match and row_match.group(1) in species_names:
-            raw_rows[row_match.group(1)] = list(row_match.group(2))
+        if len(tokens) < 2:
+            raise ValueError(f"MATRIX 第 {line_number} 列缺少狀態資料")
+        taxon = tokens[0]
+        if taxon not in species_names:
+            raise ValueError(f"MATRIX 包含未在 TAXLABELS 宣告的物種：{taxon}")
+        if taxon in raw_rows:
+            raise ValueError(f"MATRIX 物種重複或使用交錯格式：{taxon}")
 
-    if num_features is None and raw_rows:
-        num_features = len(next(iter(raw_rows.values())))
-    feature_names = [f"Char_{i + 1}" for i in range(num_features or 0)]
+        states = list("".join(tokens[1:]))
+        if len(states) != num_features:
+            raise ValueError(
+                f"MATRIX 物種 {taxon} 有 {len(states)} 個狀態，但 NCHAR={num_features}"
+            )
+        invalid_states = sorted(set(states) - allowed_states)
+        if invalid_states:
+            raise ValueError(
+                f"MATRIX 物種 {taxon} 包含 FORMAT SYMBOLS 未宣告的狀態："
+                f"{', '.join(invalid_states)}"
+            )
+        raw_rows[taxon] = states
 
-    # 盡量從 CHARLABELS 內類似 [1] 'label' 的格式取得特徵名稱（若解析失敗則維持 Char_N）
-    for idx_str, label in re.findall(r"\[(\d+)\]\s*'([^']*)'", text):
-        idx = int(idx_str) - 1
-        if 0 <= idx < len(feature_names):
-            feature_names[idx] = label
-
-    species_names = [s for s in species_names if s in raw_rows]
+    missing_taxa = [taxon for taxon in species_names if taxon not in raw_rows]
+    if missing_taxa:
+        raise ValueError(f"MATRIX 缺少物種資料：{', '.join(missing_taxa)}")
     return species_names, feature_names, raw_rows, missing_symbols
 
 
@@ -156,14 +282,10 @@ def parse_nexus_to_dataframe(file_path):
     而不是像過去那樣把缺失值硬轉成 -1 當成一個真實狀態餵給演算法。
     """
     try:
-        species_names, feature_names, raw_rows, missing_symbols = _parse_with_biopython(file_path)
-    except Exception as e:
-        print(f"⚠️ Biopython 解析失敗（{e}），改用簡易格式解析器重試...")
-        try:
-            species_names, feature_names, raw_rows, missing_symbols = _parse_with_regex_fallback(file_path)
-        except Exception as e2:
-            print(f"❌ 讀取 NEX 檔案失敗，請檢查格式是否正確。錯誤訊息: {e2}")
-            return None, None, None
+        species_names, feature_names, raw_rows, missing_symbols = _parse_nexus(file_path)
+    except (OSError, ValueError) as error:
+        print(f"❌ 讀取 NEX 檔案失敗，請檢查格式是否正確。錯誤訊息: {error}")
+        return None, None, None
 
     num_features = len(feature_names)
     state_labels = parse_statelabels(file_path)

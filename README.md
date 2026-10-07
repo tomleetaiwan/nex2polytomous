@@ -1,6 +1,6 @@
 # nex2polytomous
 
-將 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
+將 [PAUP](https://paup.phylosolutions.com/) 所使用之 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
 
 程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，先移除任一物種含有缺失符號（?）或間隙（-）之特徵欄位，再以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的編號縮排格式（如 1a.、1b.、1c.、2a.…）。
 
@@ -8,8 +8,9 @@
 
 ## 功能特色
 
-- 支援標準 NEXUS 檔案（以 [Biopython](https://biopython.org/) 解析）。
-- 若檔案使用 Biopython 無法解析的 CHARLABELS 語法（例如部分 MorphoBank 匯出格式），會自動改用內建的簡易格式解析器重試，盡量取回物種名稱、特徵名稱與矩陣資料。
+- 使用 Python 標準函式庫解析 NEXUS，不依賴 Biopython，並支援 MorphoBank 常見的 TAXLABELS、CHARLABELS、STATELABELS 與非交錯 MATRIX 格式。
+- TAXLABELS、CHARLABELS、STATELABELS 與 MATRIX 均為必要內容，缺少任一項時會停止處理並顯示錯誤。
+- 解析時會驗證 NTAX、NCHAR、物種名稱、矩陣列長度及狀態符號；若格式不完整或使用尚未支援的選項，會顯示明確錯誤，避免產生錯誤資料。
 - 若檔案包含 STATELABELS，會解析各字元的狀態說明，並在檢索表的狀態編號後顯示其實際意義。
 - 處理前會自動偵測並移除含有缺失值的特徵欄位，避免分類樹把「缺失」誤判為一種真實狀態。
 - 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 物種A / 物種B），而不會遺漏。
@@ -65,8 +66,7 @@ IG(S, A) = H(S) - Remainder(S, A)
 
 - Python 3.9 以上（開發與測試環境為 Python 3.12）
 - 套件：
-  - `biopython`
-  - `pandas`
+  - pandas
 
 ## 安裝方式
 
@@ -87,7 +87,7 @@ IG(S, A) = H(S) - Remainder(S, A)
    或手動安裝：
 
    ```powershell
-   pip install biopython pandas
+   pip install pandas
    ```
 
 ## 使用方式
@@ -105,7 +105,7 @@ IG(S, A) = H(S) - Remainder(S, A)
    python nex2polytomous.py
    ```
 
-   若要產生傳統編號縮排格式，請使用 `--output-format indented`（或簡寫 `-f indented`）：
+   若要產生傳統編號縮排格式，請使用 --output-format indented（或簡寫 -f indented）：
 
    ```powershell
    python nex2polytomous.py --output-format indented
@@ -136,7 +136,7 @@ IG(S, A) = H(S) - Remainder(S, A)
 
    輸入的先後順序就是必要特徵的優先順序。若某個必要特徵無法區分目前分支中的物種，程式會跳至下一個必要特徵；必要特徵都不適用或已使用後，便恢復選擇資訊增益（Information Gain）最高的特徵。若不需要指定必要特徵，直接按 Enter 即可完全採用原本的資訊增益策略。
 
-4. 完成後，即可在指定路徑找到輸出的 Markdown 檢索表。`--output-format indented` 的格式範例如下：
+4. 完成後，即可在指定路徑找到輸出的 Markdown 檢索表。--output-format indented 的格式範例如下：
 
    ```markdown
    1a. 特徵名稱：狀態為 0（狀態 0 的實際意義） -----------------> 前往步驟 2
@@ -148,7 +148,7 @@ IG(S, A) = H(S) - Remainder(S, A)
 
    ![傳統編號縮排格式輸出範例](./images/indented.png)
 
-   預設的 `--output-format table` 則會將編號、特徵、狀態與結果分欄：
+   預設的 --output-format table 則會將編號、特徵、狀態與結果分欄：
 
    ```markdown
    | 編號 | 特徵 | 狀態 | 結果 |
@@ -167,8 +167,8 @@ IG(S, A) = H(S) - Remainder(S, A)
 - **為什麼有兩個（或多個）物種名稱同時出現在同一個判定結果？**
   代表在移除缺失特徵後，這些物種在剩餘的所有特徵上完全相同，現有資料已無法再進一步區分它們，因此會並列顯示，而不是隨機選一個。
 
-- **讀取檔案時出現「Biopython 解析失敗」訊息怎麼辦？**
-  這通常是因為 .nex 檔案使用了 Biopython 不支援的 CHARLABELS 格式（例如部分 MorphoBank 匯出檔）。此時程式會自動改用內建的簡易格式解析器重試，通常仍可正確取得物種與矩陣資料；若特徵名稱無法解析，將以 Char_1、Char_2…等預設名稱代替。
+- **哪些 NEXUS 矩陣格式尚未支援？**
+  目前僅支援 DATATYPE=STANDARD、單字元整數狀態及非交錯矩陣。INTERLEAVE、TRANSPOSE、TOKENS、MATCHCHAR、EQUATE，以及 (01)、{01} 等多態或不確定狀態尚未支援；程式遇到這些格式時會停止並顯示錯誤，不會嘗試猜測資料。
 
 ## 授權
 
