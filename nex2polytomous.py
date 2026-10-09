@@ -386,7 +386,7 @@ def build_key_rows(df, feature_names, state_labels, required_features=None):
                 for candidate in remaining_features
             )
             if len(partition) > 1 and can_split:
-                key_rows.append((step, feature, state_value, f"前往步驟 {pair_counter}", depth))
+                key_rows.append((step, feature, state_value, f"前往步驟編號 {pair_counter}", depth))
                 recurse(partition, remaining_features, depth + 1)
             else:
                 species = [df.index[row_index] for row_index in partition]
@@ -484,7 +484,10 @@ def render_key_markdown(key_rows, output_format):
                 f"{indent}{step}. {feature}：{state} -----------------> "
                 f"{'👉 ' if isinstance(result, list) else ''}{formatted_result}"
             )
-        return "\n".join(lines)
+        return "\n".join(
+            f"{line}\\" if index < len(lines) - 1 else line
+            for index, line in enumerate(lines)
+        )
 
     if output_format == "table":
         lines = [
@@ -506,6 +509,11 @@ def render_key_markdown(key_rows, output_format):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="將 NEXUS 形態矩陣轉換為多分叉檢索表。")
     parser.add_argument(
+        "nexus_file",
+        nargs="?",
+        help=f"輸入的 NEXUS 檔案路徑（預設：{NEXUS_FILE_PATH}）",
+    )
+    parser.add_argument(
         "-f",
         "--output-format",
         choices=("table", "indented"),
@@ -517,8 +525,9 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    print(f"正在讀取並解析 NEX 檔案: {NEXUS_FILE_PATH}...")
-    df, feature_names, state_labels = parse_nexus_to_dataframe(NEXUS_FILE_PATH)
+    nexus_file = args.nexus_file if args.nexus_file is not None else NEXUS_FILE_PATH
+    print(f"正在讀取並解析 NEX 檔案: {nexus_file}...")
+    df, feature_names, state_labels = parse_nexus_to_dataframe(nexus_file)
     if df is None:
         return
 
@@ -532,9 +541,9 @@ def main(argv=None):
     )
     key_markdown = render_key_markdown(key_rows, args.output_format)
     title = (
-        "Markdown 表格式多分叉檢索表"
+        "表格式多分叉檢索表"
         if args.output_format == "table"
-        else "傳統編號縮排式多分叉檢索表 (Indented Multi-access Key)"
+        else "編號縮排式多分叉檢索表 (Indented Multi-access Key)"
     )
 
     output_directory = os.path.dirname(OUTPUT_MD_PATH)

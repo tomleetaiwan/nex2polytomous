@@ -1,6 +1,6 @@
 # nex2polytomous
 
-將 [PAUP](https://paup.phylosolutions.com/) 所使用之 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
+將 [PAUP*](https://paup.phylosolutions.com/) 所使用之 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
 
 程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，先移除任一物種含有缺失符號（?）或間隙（-）之特徵欄位，再以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的編號縮排格式（如 1a.、1b.、1c.、2a.…）。
 
@@ -15,7 +15,7 @@
 - 處理前會自動偵測並移除含有缺失值的特徵欄位，避免分類樹把「缺失」誤判為一種真實狀態。
 - 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 物種A / 物種B），而不會遺漏。
 - 執行時可依序指定容易觀察或必要的特徵；指定特徵優先使用完畢後，其餘節點仍採用資訊增益最高者優先。
-- 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 1a、1b、2a），最終物種名稱皆以粗斜體顯示。
+- 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 1a、1b、2a），最終物種名稱皆以粗斜體顯示。縮排格式每個步驟行尾會加入 Markdown 硬換行，確保預覽時逐項換行。
 
 ## 特徵選擇演算法
 
@@ -92,26 +92,32 @@ IG(S, A) = H(S) - Remainder(S, A)
 
 ## 使用方式
 
-1. 開啟 [nex2polytomous.py](./nex2polytomous.py)，修改檔案開頭的設定：
+1. （選用）若不透過命令列指定輸入檔案，可開啟 [nex2polytomous.py](./nex2polytomous.py) 修改預設輸入檔案路徑；輸出路徑也可自訂：
 
    ```python
-   NEXUS_FILE_PATH = "your_data.nex"              # 👈 換成你實際的 .nex 檔案路徑
+   NEXUS_FILE_PATH = "your_data.nex"              # 未指定命令列參數時使用
    OUTPUT_MD_PATH = "generated/polytomous_key.md"  # 👈 輸出的 Markdown 檔案路徑（可自訂）
    ```
 
-2. 執行程式。未指定輸出格式時，預設產生 Markdown 表格：
+2. 執行程式，可將 `.nex` 檔案路徑作為第一個參數傳入。未提供路徑時，程式會使用 `NEXUS_FILE_PATH` 的預設值；未指定輸出格式時，預設產生 Markdown 表格：
+
+   ```powershell
+   python nex2polytomous.py path\to\your_data.nex
+   ```
+
+   若省略檔案路徑，就會使用程式中的預設值：
 
    ```powershell
    python nex2polytomous.py
    ```
 
-   若要產生傳統編號縮排格式，請使用 --output-format indented（或簡寫 -f indented）：
+   若要產生傳統編號縮排格式，請使用 `--output-format indented`（或簡寫 `-f indented`）：
 
    ```powershell
-   python nex2polytomous.py --output-format indented
+   python nex2polytomous.py path\to\your_data.nex --output-format indented
    ```
 
-   亦可明確指定表格格式：
+   亦可省略檔案路徑並明確指定表格格式：
 
    ```powershell
    python nex2polytomous.py --output-format table
