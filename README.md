@@ -2,7 +2,7 @@
 
 將 [PAUP*](https://paup.phylosolutions.com/) 所使用之 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
 
-程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，先移除任一物種含有缺失符號（?）或間隙（-）之特徵欄位，再以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的編號縮排格式（如 1a.、1b.、1c.、2a.…）。
+程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，先讓使用者選擇要納入檢索表的物種（預設全選），再依所選物種移除含有缺失符號（?）或間隙（-）之特徵欄位，最後以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的編號縮排格式（如 1a.、1b.、1c.、2a.…）。
 
 測試用 NEXUS 檔案: 2009-early-and-middle-devonian-phacopidae-of-south-moroccan.nex 取自於 [MorphoBank](https://www.morphobank.org/project/2702/matrices) 是摩洛哥南部泥盆紀鏡眼三葉蟲支序分類論文 [Palaeontographica Canadiana No. 28: Early and Middle Devonian Phacopidae (Trilobita) of southern Morocco is a 2009 scientific monograph written by Ryan C. McKellar and Brian D. E. Chatterton.](https://www.researchgate.net/publication/232196035_Early_and_Middle_Devonian_Phacopidae_Trilobita_of_southern_Morocco) 當時以支序分類軟體 PAUP 分析時所使用之 NEXUS 檔案。
 
@@ -12,7 +12,8 @@
 - TAXLABELS、CHARLABELS、STATELABELS 與 MATRIX 均為必要內容，缺少任一項時會停止處理並顯示錯誤。
 - 解析時會驗證 NTAX、NCHAR、物種名稱、矩陣列長度及狀態符號；若格式不完整或使用尚未支援的選項，會顯示明確錯誤，避免產生錯誤資料。
 - 若檔案包含 STATELABELS，會解析各字元的狀態說明，並在檢索表的狀態編號後顯示其實際意義。
-- 處理前會自動偵測並移除含有缺失值的特徵欄位，避免分類樹把「缺失」誤判為一種真實狀態。
+- 處理前可從互動清單選擇要納入檢索表的物種，直接按 Enter 預設全選。
+- 僅依所選物種自動偵測並移除含有缺失值的特徵欄位，避免未選取的殘缺化石標本減少可用特徵。
 - 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 物種A / 物種B），而不會遺漏。
 - 執行時可依序指定容易觀察或必要的特徵；指定特徵優先使用完畢後，其餘節點仍採用資訊增益最高者優先。
 - 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 1a、1b、2a），最終物種名稱皆以粗斜體顯示。縮排格式每個步驟行尾會加入 Markdown 硬換行，確保預覽時逐項換行。
@@ -123,12 +124,20 @@ IG(S, A) = H(S) - Remainder(S, A)
    python nex2polytomous.py --output-format table
    ```
 
-3. 成功讀取資料後，程式會依序列出所有可用特徵，並要求輸入必要特徵的序號：
+3. 成功讀取資料後，程式會先列出所有物種。輸入以逗點分隔的序號可只為指定物種製作檢索表，連續序號可用 `-` 簡寫，例如 `1,3-9,12` 代表選取 1、3、4、5、6、7、8、9、12；直接按 Enter 則全選。程式會依所選物種移除含缺失值的特徵，再列出所有可用特徵並要求輸入必要特徵的序號：
 
    ```text
    正在讀取並解析 NEX 檔案: your_data.nex...
+
+   可選擇的物種：
+   1. Species A
+   2. Species B
+   3. Incomplete fossil
+
+   請輸入要製作檢索表的物種序號（以逗點分隔，連續序號可用 -，例如 1,3-9,12）；直接按 Enter 則全選：1,2
+   已選擇 2 個物種：Species A、Species B
    🧹 已移除 N 個含有缺失符號 (missing symbols) 的特徵欄位，共保留 M 個。
-   ✅ 成功載入！共偵測到 X 個物種，M 個形態特徵（已排除含缺失值的特徵）。
+   ✅ 成功載入！共選取 2 個物種，M 個形態特徵（已排除所選物種中的缺失值特徵）。
 
    可用的形態特徵：
    1. Glabellar width [1 modified]

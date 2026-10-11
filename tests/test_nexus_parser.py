@@ -1,3 +1,5 @@
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -148,6 +150,40 @@ class NexusParserTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "CHARLABELS.*1.*NCHAR=2"):
             app._parse_nexus(path)
+
+    def test_selected_species_determine_which_missing_features_are_removed(self):
+        path = self.write_nexus(
+            """#NEXUS
+            BEGIN TAXA;
+                DIMENSIONS NTAX=3;
+                TAXLABELS Complete_A Complete_B Fossil;
+            END;
+            BEGIN CHARACTERS;
+                DIMENSIONS NCHAR=2;
+                FORMAT DATATYPE=STANDARD MISSING=? GAP=- SYMBOLS="01";
+                CHARLABELS Fragile_feature Stable_feature;
+                STATELABELS 1 absent present, 2 round square;
+                MATRIX
+                    Complete_A 00
+                    Complete_B 11
+                    Fossil     ?0
+                ;
+            END;
+            """
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            all_df, all_features, _ = app.parse_nexus_to_dataframe(path)
+            selected_df, selected_features, _ = app.parse_nexus_to_dataframe(
+                path,
+                species_selector=lambda _species: ["Complete_A", "Complete_B"],
+            )
+
+        self.assertEqual(["Stable_feature"], all_features)
+        self.assertEqual(["Fragile_feature", "Stable_feature"], selected_features)
+        self.assertEqual(["Complete_A", "Complete_B"], list(selected_df.index))
+        self.assertEqual((3, 1), all_df.shape)
+        self.assertEqual((2, 2), selected_df.shape)
 
 
 if __name__ == "__main__":

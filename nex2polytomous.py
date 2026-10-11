@@ -274,40 +274,58 @@ def _parse_nexus(file_path):
     return species_names, feature_names, raw_rows, missing_symbols
 
 
-def parse_nexus_to_dataframe(file_path):
+def parse_nexus_to_dataframe(file_path, species_selector=None):
     """讀取 NEX 檔案並將形態矩陣轉換為 Pandas DataFrame。
 
+    若提供 species_selector，會在判定缺失特徵前先讓選擇器決定納入的物種。
     處理前會先「移除」含有缺失符號 (missing/gap symbol，如 '?' 或 '-') 的特徵欄位，
-    確保後續分類樹只根據每個物種都有明確狀態的形態特徵進行分支，
+    確保後續分類樹只根據所選物種都有明確狀態的形態特徵進行分支，
     而不是像過去那樣把缺失值硬轉成 -1 當成一個真實狀態餵給演算法。
     """
     try:
         species_names, feature_names, raw_rows, missing_symbols = _parse_nexus(file_path)
+        selected_species = (
+            list(species_names)
+            if species_selector is None
+            else list(species_selector(species_names))
+        )
+        if not selected_species:
+            raise ValueError("至少需要選擇一個物種")
+        if len(selected_species) != len(set(selected_species)):
+            raise ValueError("選擇的物種不可重複")
+        unknown_species = [
+            taxon for taxon in selected_species if taxon not in raw_rows
+        ]
+        if unknown_species:
+            raise ValueError(f"選擇了不存在的物種：{', '.join(unknown_species)}")
+        state_labels = parse_statelabels(file_path)
     except (OSError, ValueError) as error:
         print(f"❌ 讀取 NEX 檔案失敗，請檢查格式是否正確。錯誤訊息: {error}")
         return None, None, None
 
     num_features = len(feature_names)
-    state_labels = parse_statelabels(file_path)
 
-    # 先移除任一物種含有缺失符號 (missing/gap) 的特徵欄，而非把缺失值當成 -1 的假資料
+    # 僅依所選物種移除含缺失符號的特徵欄，而非讓未選物種影響可用特徵
     keep_indices = [
         i for i in range(num_features)
-        if all(raw_rows[taxon][i] not in missing_symbols for taxon in species_names)
+        if all(raw_rows[taxon][i] not in missing_symbols for taxon in selected_species)
     ]
     removed_count = num_features - len(keep_indices)
     if removed_count:
         print(f"🧹 已移除 {removed_count} 個含有缺失符號 (missing symbols) 的特徵欄位，共保留 {len(keep_indices)} 個。")
 
     feature_names = [feature_names[i] for i in keep_indices]
-    matrix_data = [[int(raw_rows[taxon][i]) for i in keep_indices] for taxon in species_names]
+    matrix_data = [
+        [int(raw_rows[taxon][i]) for i in keep_indices]
+        for taxon in selected_species
+    ]
     state_labels = {
         new_index: state_labels[original_index]
         for new_index, original_index in enumerate(keep_indices)
         if original_index in state_labels
     }
 
-    df = pd.DataFrame(matrix_data, columns=feature_names, index=species_names)
+    df = pd.DataFrame(matrix_data, columns=feature_names, index=selected_species)
     return df, feature_names, state_labels
 
 
@@ -443,6 +461,60 @@ def prompt_required_features(feature_names, input_fn=None, output_fn=print):
         return [number - 1 for number in numbers]
 
 
+def prompt_species_selection(species_names, input_fn=None, output_fn=print):
+    """列出物種並取得要製作檢索表的物種；直接按 Enter 代表全選。"""
+    if input_fn is None:
+        input_fn = input
+
+    output_fn("\n可選擇的物種：")
+    for number, species_name in enumerate(species_names, start=1):
+        output_fn(f"{number}. {species_name}")
+
+    prompt = (
+        "\n請輸入要製作檢索表的物種序號"
+        "（以逗點分隔，連續序號可用 -，例如 1,3-9,12）；"
+        "直接按 Enter 則全選："
+    )
+    while True:
+        raw_value = input_fn(prompt).strip()
+        if not raw_value:
+            output_fn(f"已選擇全部 {len(species_names)} 個物種。")
+            return list(species_names)
+
+        values = [value.strip() for value in raw_value.replace("，", ",").split(",")]
+        try:
+            numbers = []
+            for value in values:
+                if "-" not in value:
+                    numbers.append(int(value))
+                    continue
+
+                range_parts = [part.strip() for part in value.split("-")]
+                if len(range_parts) != 2:
+                    raise ValueError
+                range_start, range_end = map(int, range_parts)
+                if range_start > range_end:
+                    raise ValueError
+                numbers.extend(range(range_start, range_end + 1))
+        except ValueError:
+            output_fn(
+                "輸入格式錯誤：請輸入整數序號或由小到大的連續範圍"
+                "（例如 1,3-9,12）。"
+            )
+            continue
+
+        if any(number < 1 or number > len(species_names) for number in numbers):
+            output_fn(f"序號超出範圍：請輸入 1 到 {len(species_names)} 之間的序號。")
+            continue
+        if len(numbers) != len(set(numbers)):
+            output_fn("物種序號不可重複，請重新輸入。")
+            continue
+
+        selected_species = [species_names[number - 1] for number in numbers]
+        output_fn(f"已選擇 {len(selected_species)} 個物種：{'、'.join(selected_species)}")
+        return selected_species
+
+
 def format_species(species):
     """將各物種名稱分別套用 Markdown 粗斜體。"""
     return " / ".join(f"***{name}***" for name in species)
@@ -527,11 +599,17 @@ def main(argv=None):
     args = parse_args(argv)
     nexus_file = args.nexus_file if args.nexus_file is not None else NEXUS_FILE_PATH
     print(f"正在讀取並解析 NEX 檔案: {nexus_file}...")
-    df, feature_names, state_labels = parse_nexus_to_dataframe(nexus_file)
+    df, feature_names, state_labels = parse_nexus_to_dataframe(
+        nexus_file,
+        species_selector=prompt_species_selection,
+    )
     if df is None:
         return
 
-    print(f"✅ 成功載入！共偵測到 {len(df)} 個物種，{len(feature_names)} 個形態特徵（已排除含缺失值的特徵）。")
+    print(
+        f"✅ 成功載入！共選取 {len(df)} 個物種，{len(feature_names)} 個形態特徵"
+        "（已排除所選物種中的缺失值特徵）。"
+    )
     required_features = prompt_required_features(feature_names)
     key_rows = build_key_rows(
         df,
