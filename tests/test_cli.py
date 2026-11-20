@@ -1,12 +1,62 @@
 import contextlib
 import io
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import nex2polytomous as app
 
 
 class CommandLineTests(unittest.TestCase):
+    def test_main_writes_selected_format_and_defaults_to_markdown(self):
+        df = app.pd.DataFrame({"Feature": [0, 1]}, index=["Species A", "Species B"])
+        cases = [
+            ([], "md", "| 編號 | 特徵 | 狀態 | 結果 |"),
+            (["-f", "table"], "md", "| 編號 | 特徵 | 狀態 | 結果 |"),
+            (["-f", "indented"], "md", "1a. Feature：狀態為 0"),
+            (["--output-format", "html-table"], "html", "<table>"),
+            (["-f", "html-table"], "html", "<table>"),
+            (["--notes"], "md", "| 編號 | 特徵 | 狀態 | 註解 | 結果 |"),
+            (["-n"], "md", "| 編號 | 特徵 | 狀態 | 註解 | 結果 |"),
+            (["-f", "html-table", "--notes"], "html", "<th>狀態</th><th>註解</th><th>結果</th>"),
+            (["-f", "html-table", "-n"], "html", "<th>狀態</th><th>註解</th><th>結果</th>"),
+            (["-f", "indented", "--notes"], "md", "1a. Feature：狀態為 0"),
+            (["-f", "indented", "-n"], "md", "1a. Feature：狀態為 0"),
+        ]
+        for argv, extension, expected in cases:
+            with self.subTest(argv=argv), tempfile.TemporaryDirectory() as directory:
+                md_path = Path(directory) / "generated" / "key.md"
+                html_path = md_path.with_suffix(".html")
+                output = io.StringIO()
+                with patch.object(
+                    app, "parse_nexus_to_dataframe", return_value=(df, ["Feature"], {})
+                ), patch.object(
+                    app, "prompt_required_features", return_value=[]
+                ), patch.object(
+                    app, "OUTPUT_MD_PATH", str(md_path)
+                ), patch.object(
+                    app, "OUTPUT_HTML_PATH", str(html_path)
+                ), contextlib.redirect_stdout(output):
+                    app.main(argv)
+
+                output_path = html_path if extension == "html" else md_path
+                unused_path = md_path if extension == "html" else html_path
+                content = output_path.read_text(encoding="utf-8")
+                self.assertIn(expected, content)
+                self.assertIn(str(output_path), output.getvalue())
+                self.assertFalse(unused_path.exists())
+                if not any(flag in argv for flag in ("--notes", "-n")) or "indented" in argv:
+                    self.assertNotIn("註解", content)
+                if extension == "html":
+                    self.assertTrue(content.startswith("<!DOCTYPE html>"))
+                    self.assertIn('<meta charset="utf-8">', content)
+                    self.assertIn("<strong><em>Species A</em></strong>", content)
+                    self.assertTrue(content.endswith("</html>\n"))
+                else:
+                    self.assertTrue(content.startswith("# "))
+                    self.assertIn("👉 ***Species A***", content)
+
     def test_main_uses_nexus_file_argument(self):
         with patch.object(
             app,

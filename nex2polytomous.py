@@ -2,15 +2,17 @@ import argparse
 import os
 import re
 from collections import Counter
+from html import escape
 from math import log2
 
 import pandas as pd
 
 # =====================================================================
-# 1. 設定你的 NEX 檔案路徑與輸出的 Markdown 檔案路徑
+# 1. 設定你的 NEX 檔案路徑與輸出檔案路徑
 # =====================================================================
 NEXUS_FILE_PATH = "2009-early-and-middle-devonian-phacopidae-of-south-moroccan.nex"  # 👈 請換成你實際的 .nex 檔名
 OUTPUT_MD_PATH = "generated/polytomous_key.md"
+OUTPUT_HTML_PATH = "generated/polytomous_key.html"
 
 
 def _extract_nexus_command(text, command):
@@ -535,7 +537,7 @@ def _key_row_sort_key(row):
     return int(match.group(1)), match.group(2).casefold()
 
 
-def render_key_markdown(key_rows, output_format):
+def render_key_markdown(key_rows, output_format, include_notes=False):
     """將檢索表資料列輸出為縮排文字或 Markdown 表格。"""
     if output_format not in {"indented", "table"}:
         raise ValueError(
@@ -562,9 +564,13 @@ def render_key_markdown(key_rows, output_format):
         )
 
     if output_format == "table":
+        headers = ["編號", "特徵", "狀態"]
+        if include_notes:
+            headers.append("註解")
+        headers.append("結果")
         lines = [
-            "| 編號 | 特徵 | 狀態 | 結果 |",
-            "|---|---|---|---|",
+            f"| {' | '.join(headers)} |",
+            "|" + "|".join("---" for _header in headers) + "|",
         ]
         for step, feature, state, result, _depth in sorted_key_rows:
             formatted_result = format_species(result) if isinstance(result, list) else result
@@ -572,10 +578,42 @@ def render_key_markdown(key_rows, output_format):
                 formatted_result = f"👉 {formatted_result}"
             cells = [
                 _escape_markdown_table_cell(value)
-                for value in (step, feature, state, formatted_result)
+                for value in (step, feature, state)
             ]
+            if include_notes:
+                cells.append("")
+            cells.append(_escape_markdown_table_cell(formatted_result))
             lines.append(f"| {' | '.join(cells)} |")
         return "\n".join(lines)
+
+
+def render_key_html(key_rows, include_notes=False):
+    """將檢索表資料列輸出為 HTML 表格，並跳脫資料中的特殊字元。"""
+    headers = ["編號", "特徵", "狀態"]
+    if include_notes:
+        headers.append("註解")
+    headers.append("結果")
+    lines = [
+        "<table>",
+        "  <thead>",
+        "    <tr>" + "".join(f"<th>{header}</th>" for header in headers) + "</tr>",
+        "  </thead>",
+        "  <tbody>",
+    ]
+    for step, feature, state, result, _depth in sorted(key_rows, key=_key_row_sort_key):
+        cells = [escape(str(value)) for value in (step, feature, state)]
+        if include_notes:
+            cells.append("")
+        if isinstance(result, list):
+            formatted_result = "👉 " + " / ".join(
+                f"<strong><em>{escape(str(name))}</em></strong>" for name in result
+            )
+        else:
+            formatted_result = escape(str(result))
+        cells.append(formatted_result)
+        lines.append("    <tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+    lines.extend(["  </tbody>", "</table>"])
+    return "\n".join(lines)
 
 
 def parse_args(argv=None):
@@ -586,11 +624,17 @@ def parse_args(argv=None):
         help=f"輸入的 NEXUS 檔案路徑（預設：{NEXUS_FILE_PATH}）",
     )
     parser.add_argument(
+        "-n",
+        "--notes",
+        action="store_true",
+        help="在 Markdown 與 HTML 表格的狀態與結果之間加入空白註解欄（預設不啟用；縮排格式不受影響）",
+    )
+    parser.add_argument(
         "-f",
         "--output-format",
-        choices=("table", "indented"),
+        choices=("table", "indented", "html-table"),
         default="table",
-        help="輸出格式（預設：table）",
+        help="輸出格式：table（Markdown 表格）、indented（Markdown 縮排）、html-table（HTML 表格）；預設：table",
     )
     return parser.parse_args(argv)
 
@@ -617,22 +661,45 @@ def main(argv=None):
         state_labels,
         required_features=required_features,
     )
-    key_markdown = render_key_markdown(key_rows, args.output_format)
-    title = (
-        "表格式多分叉檢索表"
-        if args.output_format == "table"
-        else "編號縮排式多分叉檢索表 (Indented Multi-access Key)"
-    )
+    if args.output_format == "html-table":
+        output_path = OUTPUT_HTML_PATH
+        key_content = render_key_html(key_rows, include_notes=args.notes)
+        document = (
+            '<!DOCTYPE html>\n<html lang="zh-Hant">\n<head>\n'
+            '<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            "<title>表格式多分叉檢索表</title>\n"
+            "<style>\n"
+            "table { border-collapse: collapse; }\n"
+            "th, td { border: 1px solid #777; padding: 0.5em; text-align: left; }\n"
+            "</style>\n</head>\n<body>\n"
+            "<h1>表格式多分叉檢索表</h1>\n"
+            f"<p>本檢索表由 NEX 形態矩陣自動優化生成，共包含 {len(df)} 個物種。</p>\n"
+            f"{key_content}\n</body>\n</html>\n"
+        )
+    else:
+        output_path = OUTPUT_MD_PATH
+        key_content = render_key_markdown(
+            key_rows, args.output_format, include_notes=args.notes
+        )
+        title = (
+            "表格式多分叉檢索表"
+            if args.output_format == "table"
+            else "編號縮排式多分叉檢索表 (Indented Multi-access Key)"
+        )
+        document = (
+            f"# {title}\n"
+            f"本檢索表由 NEX 形態矩陣自動優化生成，共包含 {len(df)} 個物種。\n\n---\n\n"
+            f"{key_content}\n"
+        )
 
-    output_directory = os.path.dirname(OUTPUT_MD_PATH)
+    output_directory = os.path.dirname(output_path)
     if output_directory:
         os.makedirs(output_directory, exist_ok=True)
-    with open(OUTPUT_MD_PATH, "w", encoding="utf-8") as f:
-        f.write(f"# {title}\n")
-        f.write(f"本檢索表由 NEX 形態矩陣自動優化生成，共包含 {len(df)} 個物種。\n\n---\n\n")
-        f.write(key_markdown + "\n")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(document)
 
-    print(f"🎉 轉換完成！檢索表已儲存至：{OUTPUT_MD_PATH}")
+    print(f"🎉 轉換完成！檢索表已儲存至：{output_path}")
 
 
 if __name__ == "__main__":

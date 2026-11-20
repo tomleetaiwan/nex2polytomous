@@ -1,6 +1,6 @@
 # nex2polytomous
 
-將 [PAUP*](https://paup.phylosolutions.com/) 所使用之 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為「編號縮排式多分叉檢索表」（Indented multi-access key）Markdown 檔案的小工具。
+將 [PAUP*](https://paup.phylosolutions.com/) 所使用之 [NEXUS](https://en.wikipedia.org/wiki/Nexus_file)（.nex）形態特徵矩陣，自動轉換為多分叉檢索表的小工具，支援 Markdown（預設）與 HTML 表格輸出。
 
 程式會讀取 .nex 檔中的物種（Taxa）與形態特徵矩陣，先讓使用者選擇要納入檢索表的物種（預設全選），再依所選物種移除含有缺失符號（?）或間隙（-）之特徵欄位，最後以資訊增益（Information Gain）準則自動找出最具區辨力的特徵組合。每個狀態會建立獨立分支，最後輸出成傳統分類學上常見的編號縮排格式（如 1a.、1b.、1c.、2a.…）。
 
@@ -17,6 +17,7 @@
 - 若移除缺失特徵後仍有物種彼此完全相同、無法區分，檢索表會將這些物種並列顯示（如 物種A / 物種B），而不會遺漏。
 - 執行時可依序指定容易觀察或必要的特徵；指定特徵優先使用完畢後，其餘節點仍採用資訊增益最高者優先。
 - 可選擇輸出為傳統編號縮排格式或 Markdown 表格；兩種格式皆依步驟編號排序（如 1a、1b、2a），最終物種名稱皆以粗斜體顯示。縮排格式每個步驟行尾會加入 Markdown 硬換行，確保預覽時逐項換行。
+- 亦可輸出為 HTML 表格，產生包含 UTF-8 編碼設定的完整網頁，直接用瀏覽器開啟即可查看；同樣依步驟編號排序並以粗斜體顯示物種名稱，資料中的 HTML 特殊字元會自動跳脫。
 
 ## 特徵選擇演算法
 
@@ -98,6 +99,7 @@ IG(S, A) = H(S) - Remainder(S, A)
    ```python
    NEXUS_FILE_PATH = "your_data.nex"              # 未指定命令列參數時使用
    OUTPUT_MD_PATH = "generated/polytomous_key.md"  # 👈 輸出的 Markdown 檔案路徑（可自訂）
+   OUTPUT_HTML_PATH = "generated/polytomous_key.html"  # HTML 輸出檔案路徑（可自訂）
    ```
 
 2. 執行程式，可將 `.nex` 檔案路徑作為第一個參數傳入。未提供路徑時，程式會使用 `NEXUS_FILE_PATH` 的預設值；未指定輸出格式時，預設產生 Markdown 表格：
@@ -123,6 +125,23 @@ IG(S, A) = H(S) - Remainder(S, A)
    ```powershell
    python nex2polytomous.py --output-format table
    ```
+
+   若要產生 HTML 表格，請使用 `--output-format html-table`（或簡寫 `-f html-table`）：
+
+   ```powershell
+   python nex2polytomous.py path\to\your_data.nex --output-format html-table
+   ```
+
+   HTML 會儲存至 `OUTPUT_HTML_PATH`（預設為 `generated/polytomous_key.html`），不會覆寫 Markdown 檔案。省略 `--output-format` 時仍輸出 Markdown 表格至 `OUTPUT_MD_PATH`。
+
+   若要預留欄位供日後自行編輯增添註解，可加上 `--notes`（或簡寫 `-n`，預設不啟用）：
+
+   ```powershell
+   python nex2polytomous.py path\to\your_data.nex --notes
+   python nex2polytomous.py path\to\your_data.nex -f html-table -n
+   ```
+
+   兩種表格皆會依序顯示「編號、特徵、狀態、註解、結果」，每列的註解欄初始為空白。可自行編輯輸出的 Markdown 或 HTML 檔案填入註解；此選項不影響 `indented` 縮排格式。重新產生檢索表會覆寫輸出檔案，請先另存已填寫註解的版本。
 
 3. 成功讀取資料後，程式會先列出所有物種。輸入以逗點分隔的序號可只為指定物種製作檢索表，連續序號可用 `-` 簡寫，例如 `1,3-9,12` 代表選取 1、3、4、5、6、7、8、9、12；直接按 Enter 則全選。程式會依所選物種移除含缺失值的特徵，再列出所有可用特徵並要求輸入必要特徵的序號：
 
@@ -151,7 +170,7 @@ IG(S, A) = H(S) - Remainder(S, A)
 
    輸入的先後順序就是必要特徵的優先順序。若某個必要特徵無法區分目前分支中的物種，程式會跳至下一個必要特徵；必要特徵都不適用或已使用後，便恢復選擇資訊增益（Information Gain）最高的特徵。若不需要指定必要特徵，直接按 Enter 即可完全採用原本的資訊增益策略。
 
-4. 完成後，即可在指定路徑找到輸出的 Markdown 檢索表。--output-format indented 的格式範例如下：
+4. 完成後，即可在指定路徑找到輸出的檢索表；HTML 檔案可直接用瀏覽器開啟。--output-format indented 的格式範例如下：
 
    ```markdown
    1a. 特徵名稱：狀態為 0（狀態 0 的實際意義） -----------------> 前往步驟 2
